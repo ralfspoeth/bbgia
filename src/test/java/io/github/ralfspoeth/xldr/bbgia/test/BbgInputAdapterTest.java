@@ -11,7 +11,10 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.module.ModuleReader;
-import java.util.*;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 
 import static java.util.stream.Collectors.joining;
 import static org.junit.jupiter.api.Assertions.assertFalse;
