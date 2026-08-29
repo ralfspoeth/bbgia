@@ -8,14 +8,17 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.module.ModuleReader;
 import java.util.*;
 import java.util.regex.Pattern;
 
+import static java.nio.charset.StandardCharsets.US_ASCII;
 import static java.util.stream.Collectors.joining;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 public class BbgInputAdapterTest {
 
@@ -56,12 +59,26 @@ public class BbgInputAdapterTest {
     private static final List<String> FIELDS =
             List.of("#id", "runDate", "price", "lastUpdate", "vola");
 
+    /**
+     * Real replies are development samples and are not in the repository - they
+     * carry a firm name, a Data License account and the securities it is
+     * entitled to. Drop your own into {@code src/test/resources} and the two
+     * tests below run over them; on a clean clone they skip.
+     * <p>
+     * A skipped test is indistinguishable from a broken one, which is why
+     * nothing that matters is only checked here. Every claim about what this
+     * adapter does is also made against a reply written into these sources -
+     * {@link #MIXED} and {@link BbgConformanceTest} - and those always run. What
+     * the samples add is breadth: 27 real files, several hundred thousand lines,
+     * yellow keys and edge cases nobody would think to type out.
+     */
+    private static final String SAMPLES_MISSING =
+            "no .out samples in src/test/resources; this test needs real replies";
+
     @Test
     public void listResources() throws IOException {
         var fixtures = fixtures();
-        // a listing that quietly finds nothing would let this pass while reading
-        // no file at all, which is the one way a test like this fails silently
-        assertFalse(fixtures.isEmpty(), "no .out fixtures in " + getClass().getModule());
+        assumeFalse(fixtures.isEmpty(), SAMPLES_MISSING);
         fixtures.forEach(f -> parse(all, "all", f).forEach(System.out::println));
     }
 
@@ -71,11 +88,13 @@ public class BbgInputAdapterTest {
      * for equities and bonds together and they land in different tables.
      * <p>
      * Asserted as a relation between the two reads rather than against a count,
-     * so it says something whatever the fixtures happen to hold.
+     * so it says something whatever the samples happen to hold.
      */
     @Test
     public void theDiscriminatorKeepsOnlyItsOwnLines() throws IOException {
-        for (var fixture : fixtures()) {
+        var fixtures = fixtures();
+        assumeFalse(fixtures.isEmpty(), SAMPLES_MISSING);
+        for (var fixture : fixtures) {
             var everything = ids(all, "all", fixture);
             var equities = ids(equity, "equity", fixture);
             assertTrue(everything.containsAll(equities), fixture + ": " + equities);
@@ -87,6 +106,75 @@ public class BbgInputAdapterTest {
     }
 
     /**
+     * One request, four kinds of security, and the yellow key at the end of the
+     * {@code #id} is the only thing telling them apart.
+     * <p>
+     * The same claim as {@link #theDiscriminatorKeepsOnlyItsOwnLines}, made
+     * against a file written here rather than against the corpus. Three of the
+     * fixtures do mix Equity with Index or Corp, so that test is not vacuous -
+     * but which three is an accident of what was downloaded, the files are not
+     * in the repository, and none of them lets a reader see the expected answer
+     * beside the input. This one is six lines and the split is on the page.
+     */
+    private static final String MIXED = """
+            START-OF-FILE
+            RUNDATE=20260822
+            DATEFORMAT=yyyymmdd
+            START-OF-FIELDS
+            PX_LAST_EOD
+            LAST_UPDATE_DATE_EOD
+            END-OF-FIELDS
+            START-OF-DATA
+            MFGEPIC SW Equity|0|2|15.360|20260820|
+            T 4 02/15/34 Govt|0|2|99.125|20260820|
+            VOD LN Equity|0|2|71.240|20260820|
+            EUR Curncy|0|2|1.0842|20260820|
+            IBM 3.5 05/15/29 Corp|0|2|101.500|20260820|
+            DAI GY Equity|0|2|54.980|20260820|
+            END-OF-DATA
+            END-OF-FILE
+            """;
+
+    @Test
+    public void theDiscriminatorKeepsTheEquitiesOutOfAmixedReply() {
+        assertEquals(
+                List.of("MFGEPIC SW Equity", "T 4 02/15/34 Govt", "VOD LN Equity",
+                        "EUR Curncy", "IBM 3.5 05/15/29 Corp", "DAI GY Equity"),
+                idsOf(all, "all", MIXED),
+                "every line, in the order the file wrote them");
+
+        assertEquals(
+                List.of("MFGEPIC SW Equity", "VOD LN Equity", "DAI GY Equity"),
+                idsOf(equity, "equity", MIXED),
+                "and only the three whose #id ends in Equity");
+    }
+
+    /**
+     * The pattern is matched in full rather than searched for, which is what
+     * {@code matches} means everywhere in a spec: a bond whose issuer happens to
+     * be called Equity Residential is not an equity.
+     */
+    @Test
+    public void theDiscriminatorMatchesInFullRatherThanAnywhere() {
+        var confusing = MIXED.replace(
+                "IBM 3.5 05/15/29 Corp|0|2|101.500|20260820|",
+                "Equity Residential 3 01/15/30 Corp|0|2|101.500|20260820|");
+        assertEquals(
+                List.of("MFGEPIC SW Equity", "VOD LN Equity", "DAI GY Equity"),
+                idsOf(equity, "equity", confusing));
+    }
+
+    /** the ids one record selector keeps out of a reply written here */
+    private List<String> idsOf(InputAdapter adapter, String recordSelector, String content) {
+        try (var is = new ByteArrayInputStream(content.getBytes(US_ASCII));
+             var rows = adapter.parse(is, recordSelector, new HashSet<>(FIELDS)).rows()) {
+            return rows.map(r -> String.valueOf(r.get("#id"))).toList();
+        } catch (IOException e) {
+            throw new UncheckedIOException(recordSelector, e);
+        }
+    }
+
+    /**
      * A record selector the spec does not declare is a typo in a mapping, and
      * the adapter is the only place it can surface. It used to hand back an
      * empty result, so a spec asking the equity adapter for "all" loaded nothing
@@ -94,8 +182,7 @@ public class BbgInputAdapterTest {
      */
     @Test
     public void refusesArecordSelectorTheSpecDoesNotDeclare() throws IOException {
-        var fixture = fixtures().getFirst();
-        try (var is = getClass().getResourceAsStream("/" + fixture)) {
+        try (var is = new ByteArrayInputStream(MIXED.getBytes(US_ASCII))) {
             var thrown = assertThrows(IllegalArgumentException.class,
                     () -> equity.parse(is, "all", new HashSet<>(FIELDS)));
             assertTrue(thrown.getMessage().contains("equity"),
@@ -106,8 +193,7 @@ public class BbgInputAdapterTest {
     /** and so is a field the record selector has not got */
     @Test
     public void refusesAfieldSelectorTheRecordSelectorHasNot() throws IOException {
-        var fixture = fixtures().getFirst();
-        try (var is = getClass().getResourceAsStream("/" + fixture)) {
+        try (var is = new ByteArrayInputStream(MIXED.getBytes(US_ASCII))) {
             var thrown = assertThrows(IllegalArgumentException.class,
                     () -> all.parse(is, "all", Set.of("noSuchField")));
             assertTrue(thrown.getMessage().contains("noSuchField"), thrown.getMessage());

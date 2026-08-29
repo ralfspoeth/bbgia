@@ -129,10 +129,27 @@ is available.
 mvn clean verify
 ```
 
-Java 25 or later. The tests need no database and no network; `BbgConformanceTest`
-runs the adapter against xldr's published
+Java 25 or later. The tests need no database, no network and no sample files;
+`BbgConformanceTest` runs the adapter against xldr's published
 [conformance kit](https://github.com/ralfspoeth/xldr/tree/HEAD/tck), which
 checks six of the ten obligations an adapter owes its caller. The other four -
 what this format cannot mean, what a bad record looks like, whether it can tell
 empty from absent, and what state it might have kept - are in
 `BbgInputAdapterTest`, because no kit could know them.
+
+### Development samples
+
+Real `.out` replies are **not** in the repository and are ignored by git. One
+carries the firm name and Data License account it was fetched under, and the
+securities that account is entitled to; that is not ours to publish, and a test
+corpus is a poor reason to try.
+
+Drop your own into `src/test/resources` and two tests in `BbgInputAdapterTest`
+pick them up: one reads every file and prints what it got, the other checks that
+a discriminator on `#id` keeps exactly the lines whose yellow key says so. Both
+skip when the directory is empty, so a clean clone is green.
+
+Nothing that matters is checked only there. Every claim about the adapter is also
+made against a reply written into the test sources, and those run either way -
+what the samples add is breadth, which is exactly what a handful of typed-out
+lines cannot give you.

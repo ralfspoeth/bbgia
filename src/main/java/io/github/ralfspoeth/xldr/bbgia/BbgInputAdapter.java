@@ -50,7 +50,7 @@ import java.util.stream.Stream;
  * </pre>
  *
  * <h2>Properties</h2>
- *
+ * <p>
  * {@code charset} (default {@code US-ASCII}, which is what Data License
  * delivers), and the three every adapter takes - {@code dateFormat},
  * {@code numberFormat}, {@code locale} - applied through {@link Formats}. Where
@@ -58,7 +58,7 @@ import java.util.stream.Stream;
  * see {@link #javaDatePattern}.
  *
  * <h2>One limit worth knowing</h2>
- *
+ * <p>
  * The records are streamed, so a {@code tag:} selector sees the tags written
  * <em>before</em> {@code START-OF-DATA} - which is all of them but
  * {@code TIMEFINISHED}. Reading that one would mean buffering every record until
@@ -70,10 +70,14 @@ class BbgInputAdapter implements InputAdapter {
 
     private static final Pattern PIPE = Pattern.compile("\\|");
 
-    /** the prefix that says a selector names a header tag rather than a field */
+    /**
+     * the prefix that says a selector names a header tag rather than a field
+     */
     private static final String TAG = "tag:";
 
-    /** the tag by which a reply declares how it spells its dates */
+    /**
+     * the tag by which a reply declares how it spells its dates
+     */
     private static final String DATE_FORMAT_TAG = "DATEFORMAT";
 
     private static final String CHARSET = "charset";
@@ -109,10 +113,14 @@ class BbgInputAdapter implements InputAdapter {
 
         DataType dataType();
 
-        /** a header tag, written {@code tag:RUNDATE}; one value for the whole file */
+        /**
+         * a header tag, written {@code tag:RUNDATE}; one value for the whole file
+         */
         record Tag(String name, DataType dataType) implements Address {}
 
-        /** a data field by the name the file gives it in {@code START-OF-FIELDS} */
+        /**
+         * a data field by the name the file gives it in {@code START-OF-FIELDS}
+         */
         record Named(String name, DataType dataType) implements Address {}
 
         /**
@@ -136,7 +144,9 @@ class BbgInputAdapter implements InputAdapter {
      */
     private record Header(Map<String, String> tags, Map<String, Integer> fieldIndex, Formats formats) {}
 
-    /** the header, and whether a data section follows it */
+    /**
+     * the header, and whether a data section follows it
+     */
     private record Head(Header header, boolean dataFollows) {}
 
     /**
@@ -256,7 +266,9 @@ class BbgInputAdapter implements InputAdapter {
         };
     }
 
-    /** the value at a position, or null where the line has no such position */
+    /**
+     * the value at a position, or null where the line has no such position
+     */
     private static @Nullable String at(String[] line, int index) {
         return index >= 0 && index < line.length ? line[index] : null;
     }
@@ -264,19 +276,19 @@ class BbgInputAdapter implements InputAdapter {
     private static @Nullable Object value(@Nullable Address address, String[] line, Header header) {
         if (address == null) {
             return null;
+        } else {
+            var text = raw(address, line, header);
+
+            return switch (text) {
+                case null -> null;
+                // Bloomberg's "not subscribed" and "not available"
+                case "N.S.", "N.A." -> null;
+                // through Formats rather than parsing here, so that dateFormat,
+                // numberFormat and locale mean in this format what they mean in
+                // every other one
+                default -> header.formats().parse(address.dataType(), text);
+            };
         }
-        var text = raw(address, line, header);
-        if (text == null) {
-            return null;
-        }
-        return switch (text) {
-            // Bloomberg's "not supplied" and "not available"
-            case "N.S.", "N.A." -> null;
-            // through Formats rather than parsing here, so that dateFormat,
-            // numberFormat and locale mean in this format what they mean in
-            // every other one
-            default -> header.formats().parse(address.dataType(), text);
-        };
     }
 
     /**
@@ -340,10 +352,10 @@ class BbgInputAdapter implements InputAdapter {
 
         var rows = head.dataFollows()
                 ? lines.lines()
-                        .takeWhile(line -> !"END-OF-DATA".equals(line))
-                        .map(PIPE::split)
-                        .filter(line -> kind.selects(line, header))
-                        .map(line -> (Row) name -> value(kind.addresses().get(name), line, header))
+                .takeWhile(line -> !"END-OF-DATA".equals(line))
+                .map(PIPE::split)
+                .filter(line -> kind.selects(line, header))
+                .map(line -> (Row) name -> value(kind.addresses().get(name), line, header))
                 : Stream.<Row>empty();
 
         return new Result(fields, rows);

@@ -34,3 +34,11 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Bloomberg replies ###
+# Real .out files are development samples and stay out of the repository: they
+# carry a firm name, a Data License account and the securities that account is
+# entitled to. Drop your own into src/test/resources and the fixture-driven
+# tests pick them up; without them those tests skip and the rest still run on
+# samples written into the test sources.
+src/test/resources/*.out
