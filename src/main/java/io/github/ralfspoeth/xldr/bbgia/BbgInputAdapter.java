@@ -22,7 +22,7 @@ import java.util.stream.Stream;
 
 import static java.util.Optional.ofNullable;
 
-class BbgImpInputAdapter implements InputAdapter {
+class BbgInputAdapter implements InputAdapter {
 
     // the pipe | character
     private static final Pattern PIPE = Pattern.compile("\\|");
@@ -92,7 +92,7 @@ class BbgImpInputAdapter implements InputAdapter {
     private final Map<String, Map<String, Selector>> selectorMap = new HashMap<>();
 
 
-    public BbgImpInputAdapter(InputSpec inputSpec) {
+    public BbgInputAdapter(InputSpec inputSpec) {
         inputSpec.recordSelectors().forEach(rs -> {
             var m = selectorMap.computeIfAbsent(rs.name(), _ -> new HashMap<>(ALWAYS));
             rs.fieldSelectors().forEach(fs -> {

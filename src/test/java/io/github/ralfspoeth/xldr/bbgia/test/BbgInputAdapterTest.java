@@ -17,7 +17,7 @@ import static java.util.stream.Collectors.joining;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-public class BbgImpInputAdapterTest {
+public class BbgInputAdapterTest {
 
     private static InputAdapterFactory IAF;
     private InputAdapter ia;
@@ -66,7 +66,7 @@ public class BbgImpInputAdapterTest {
      * needs nothing of Maven's layout.
      */
     private static List<String> fixtures() throws IOException {
-        var module = BbgImpInputAdapterTest.class.getModule();
+        var module = BbgInputAdapterTest.class.getModule();
         var reference = ModuleLayer.boot()
                 .configuration()
                 .findModule(module.getName())

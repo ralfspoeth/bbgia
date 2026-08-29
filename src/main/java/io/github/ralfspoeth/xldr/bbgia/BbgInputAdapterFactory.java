@@ -6,7 +6,7 @@ import io.github.ralfspoeth.xldr.spec.InputSpec;
 
 import java.util.Set;
 
-public class BbgImpInputAdapterFactory implements InputAdapterFactory {
+public class BbgInputAdapterFactory implements InputAdapterFactory {
     @Override
     public boolean reads(String mimeType) {
         return Set.of("application/x-bbg-imp", "text/plain").contains(mimeType);
@@ -14,6 +14,6 @@ public class BbgImpInputAdapterFactory implements InputAdapterFactory {
 
     @Override
     public InputAdapter createInputAdapter(InputSpec spec) {
-        return new BbgImpInputAdapter(spec);
+        return new BbgInputAdapter(spec);
     }
 }
