@@ -4,12 +4,12 @@ import io.github.ralfspoeth.xldr.ia.InputAdapter;
 import io.github.ralfspoeth.xldr.ia.InputAdapterFactory;
 import io.github.ralfspoeth.xldr.spec.InputSpec;
 
-import java.util.Set;
+import java.util.Objects;
 
 public class BbgInputAdapterFactory implements InputAdapterFactory {
     @Override
     public boolean reads(String mimeType) {
-        return Set.of("application/x-bbg-imp", "text/plain").contains(mimeType);
+        return Objects.equals("application/x-bloomberg-out", mimeType);
     }
 
     @Override
