@@ -66,14 +66,14 @@ public class BbgConformanceTest extends InputAdapterContract {
      * requires it - so from a test module the service lookup is the interface.
      */
     @Override
-    protected InputAdapterFactory factory() {
+    protected @NonNull InputAdapterFactory factory() {
         return InputAdapterFactory.of(new InputSpec(MIME_TYPE, List.of(), List.of(), Map.of()))
                 .orElseThrow(() -> new IllegalStateException(
                         "no factory reads " + MIME_TYPE + "; is the bbgia module in the graph?"));
     }
 
     @Override
-    protected String mimeType() {
+    protected @NonNull String mimeType() {
         return MIME_TYPE;
     }
 
@@ -84,7 +84,7 @@ public class BbgConformanceTest extends InputAdapterContract {
      * text.
      */
     @Override
-    protected InputSpec spec() {
+    protected @NonNull InputSpec spec() {
         return new InputSpec(MIME_TYPE, List.of(
                 new RecordSelectorSpec("all", Locator.every(), List.of(
                         new FieldSelectorSpec("id", "#id", DataType.TEXT),
