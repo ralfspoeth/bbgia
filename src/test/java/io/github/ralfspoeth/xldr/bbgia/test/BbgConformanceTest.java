@@ -95,4 +95,9 @@ public class BbgConformanceTest extends InputAdapterContract {
     protected byte[] sample() {
         return SAMPLE.getBytes(US_ASCII);
     }
+
+    @Override
+    protected List<Refusal> refusals() {
+        return List.of(); // todo
+    }
 }
