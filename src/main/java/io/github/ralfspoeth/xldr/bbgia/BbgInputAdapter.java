@@ -198,7 +198,16 @@ class BbgInputAdapter implements InputAdapter {
         inputSpec.recordSelectors().forEach(rs -> {
             var forRecord = new LinkedHashMap<>(ALWAYS);
             rs.fieldSelectors().forEach(fs -> forRecord.put(fs.name(), addressOf(fs)));
-            kinds.put(rs.name(), new Kind(testOf(rs), Collections.unmodifiableMap(forRecord)));
+            // putIfAbsent and not put: two record selectors of one name would
+            // otherwise leave the second silently in place of the first, and a
+            // mapping naming it could not have said which it meant. The CSV
+            // adapter in xldr had this exact hole until 0.51, where it was found
+            // by the conformance kit rather than by anyone reading the code
+            var kind = new Kind(testOf(rs), Collections.unmodifiableMap(forRecord));
+            if (kinds.putIfAbsent(rs.name(), kind) != null) {
+                throw new IllegalArgumentException("two record selectors are named '" + rs.name()
+                        + "'; a mapping names one of them and could not say which");
+            }
         });
     }
 

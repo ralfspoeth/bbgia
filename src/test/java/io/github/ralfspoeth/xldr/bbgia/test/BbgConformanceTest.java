@@ -3,6 +3,7 @@ package io.github.ralfspoeth.xldr.bbgia.test;
 import io.github.ralfspoeth.xldr.ia.InputAdapterFactory;
 import io.github.ralfspoeth.xldr.spec.*;
 import io.github.ralfspoeth.xldr.tck.InputAdapterContract;
+import org.jspecify.annotations.NonNull;
 
 import java.util.List;
 import java.util.Map;
@@ -12,17 +13,21 @@ import static java.nio.charset.StandardCharsets.US_ASCII;
 /**
  * This adapter against the published conformance kit.
  * <p>
- * Six of the ten obligations in {@code ia}'s package documentation are checkable
- * without knowing the format, and extending this is the whole of running them.
- * It is worth more here than for an adapter inside the xldr reactor: this one
- * lives in its own repository, against a released version of the SPI, and the
- * obligations are prose that nothing else enforces. The swift-mt adapter was
- * written the same way and diverged on one of them.
+ * Since xldr 0.51 the kit checks all ten of the obligations in {@code ia}'s
+ * package documentation, and extending this is most of running them. Seven need
+ * nothing but a factory, a MIME type, a spec and a sample; three take evidence
+ * only this module can produce, through {@link #refusals()} - which is abstract,
+ * so the question cannot be left unanswered - and {@code absences()} and
+ * {@code breakages()}, which default to empty and skip while saying so.
  * <p>
- * The other four stay in {@link BbgInputAdapterTest}, being about what this
- * format cannot mean: a {@code selector} where there is nothing to point at, a
- * discriminator over the one data section, and a {@code DATEFORMAT} spelling
- * nobody can translate.
+ * It is worth more here than for an adapter inside the xldr reactor: this one
+ * lives in its own repository, against a released version of the SPI. The
+ * swift-mt adapter was written the same way and diverged on the typing
+ * obligation, because at the time nothing stated it.
+ * <p>
+ * What stays in {@link BbgInputAdapterTest} is what is wrong with a <em>file</em>
+ * rather than with a spec - chiefly a {@code DATEFORMAT} spelling nobody can
+ * translate, which the reply declares and no spec could have been checked for.
  */
 public class BbgConformanceTest extends InputAdapterContract {
 
@@ -92,12 +97,43 @@ public class BbgConformanceTest extends InputAdapterContract {
     }
 
     @Override
-    protected byte[] sample() {
+    protected byte @NonNull [] sample() {
         return SAMPLE.getBytes(US_ASCII);
     }
 
+    /**
+     * A short list, and the shortness is the honest answer.
+     * <p>
+     * Most of what can be wrong with a spec here is wrong about a <em>file</em>
+     * rather than about the spec: a {@code DATEFORMAT} spelling this adapter
+     * cannot translate is refused when the header is read, because it is the
+     * reply that declares it and no spec could have been checked for it ahead of
+     * time. That belongs in {@link BbgInputAdapterTest}, not here, and the
+     * distinction is what this hook is for - obligation 1 is about the last
+     * moment before a file exists.
+     */
     @Override
-    protected List<Refusal> refusals() {
-        return List.of(); // todo
+    protected @NonNull List<Refusal> refusals() {
+        var price = new FieldSelectorSpec("price", "PX_LAST_EOD", DataType.DECIMAL);
+        return List.of(
+                new Refusal("a locator pointing at records, where a reply has one data section"
+                        + " and nothing to point at",
+                        spec(Map.of(), Locator.at("/data"), price)),
+                new Refusal("two record selectors of one name",
+                        new InputSpec(MIME_TYPE,
+                                List.of(records(Locator.every(), price), records(Locator.every(), price)),
+                                List.of(), Map.of())),
+                new Refusal("a charset this JVM does not have, which would otherwise surface as a"
+                        + " decoding failure on the first reply rather than when the feed is set up",
+                        spec(Map.of("charset", "utf-97"), Locator.every(), price)));
+    }
+
+    private static InputSpec spec(Map<String, String> properties, Locator locator,
+                                  FieldSelectorSpec... fields) {
+        return new InputSpec(MIME_TYPE, List.of(records(locator, fields)), List.of(), properties);
+    }
+
+    private static RecordSelectorSpec records(Locator locator, FieldSelectorSpec... fields) {
+        return new RecordSelectorSpec("all", locator, List.of(fields));
     }
 }
