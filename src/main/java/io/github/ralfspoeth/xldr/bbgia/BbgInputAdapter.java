@@ -276,27 +276,53 @@ class BbgInputAdapter implements InputAdapter {
     }
 
     /**
+     * The security a data line is about, for a complaint to name.
+     * <p>
+     * Position zero, which {@code #id} also resolves to - taken directly rather
+     * than through {@link #raw} because this is called from a failure path, where
+     * a second lookup that could itself fail would replace the message with a
+     * worse one.
+     */
+    private static String security(String[] line) {
+        return line.length > 0 && !line[0].isBlank()
+                ? "'" + line[0] + "'"
+                : "a data line carrying no identifier";
+    }
+
+    /**
      * the value at a position, or null where the line has no such position
      */
     private static @Nullable String at(String[] line, int index) {
         return index >= 0 && index < line.length ? line[index] : null;
     }
 
-    private static @Nullable Object value(@Nullable Address address, String[] line, Header header) {
+    private static @Nullable Object value(String name, @Nullable Address address,
+                                          String[] line, Header header) {
         if (address == null) {
             return null;
         } else {
             var text = raw(address, line, header);
 
-            return switch (text) {
-                case null -> null;
-                // Bloomberg's "not subscribed" and "not available"
-                case "N.S.", "N.A." -> null;
-                // through Formats rather than parsing here, so that dateFormat,
-                // numberFormat and locale mean in this format what they mean in
-                // every other one
-                default -> header.formats().parse(address.dataType(), text);
-            };
+            try {
+                return switch (text) {
+                    case null -> null;
+                    // Bloomberg's "not subscribed" and "not available"
+                    case "N.S.", "N.A." -> null;
+                    // through Formats rather than parsing here, so that dateFormat,
+                    // numberFormat and locale mean in this format what they mean in
+                    // every other one
+                    default -> header.formats().parse(address.dataType(), text);
+                };
+            } catch (RuntimeException e) {
+                // Obligation 7 of the SPI: say which record it was. This format is
+                // luckier than most - a data line begins with the security it is
+                // about, so the complaint can name a thing an operator recognises
+                // and can grep the reply for, rather than an ordinal they would
+                // have to count out of a file of forty thousand lines.
+                throw new IllegalStateException("cannot read field '" + name + "' of "
+                        + security(line) + " as " + address.dataType()
+                        + ", from '" + text + "': " + e.getMessage(), e);
+            }
         }
     }
 
@@ -364,7 +390,7 @@ class BbgInputAdapter implements InputAdapter {
                 .takeWhile(line -> !"END-OF-DATA".equals(line))
                 .map(PIPE::split)
                 .filter(line -> kind.selects(line, header))
-                .map(line -> (Row) name -> value(kind.addresses().get(name), line, header))
+                .map(line -> (Row) name -> value(name, kind.addresses().get(name), line, header))
                 : Stream.<Row>empty();
 
         return new Result(fields, rows);

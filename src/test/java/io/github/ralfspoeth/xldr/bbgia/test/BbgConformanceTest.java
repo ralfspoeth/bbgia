@@ -28,6 +28,12 @@ import static java.nio.charset.StandardCharsets.US_ASCII;
  * What stays in {@link BbgInputAdapterTest} is what is wrong with a <em>file</em>
  * rather than with a spec - chiefly a {@code DATEFORMAT} spelling nobody can
  * translate, which the reply declares and no spec could have been checked for.
+ * <p>
+ * All ten obligations are checked here as of xldr 0.53: nothing is declined. The
+ * two that were skipping until then were skipping honestly - this adapter had
+ * supplied no sample with a value missing, and did not name the record when a
+ * value would not convert, the second being a real gap that the skip is what
+ * found.
  */
 public class BbgConformanceTest extends InputAdapterContract {
 
@@ -126,6 +132,85 @@ public class BbgConformanceTest extends InputAdapterContract {
                 new Refusal("a charset this JVM does not have, which would otherwise surface as a"
                         + " decoding failure on the first reply rather than when the feed is set up",
                         spec(Map.of("charset", "utf-97"), Locator.every(), price)));
+    }
+
+    /**
+     * A reply Bloomberg has no price in at all.
+     * <p>
+     * {@code N.A.} is how it says "not available", and this adapter reads it as
+     * an absent value rather than as the text - which is the whole of obligation
+     * 6 for this format. The main sample already carries one of these beside a
+     * priced security; the check wants the field absent in <em>every</em> record,
+     * so this one drops the priced line.
+     */
+    private static final String NOTHING_PRICED = """
+            START-OF-FILE
+            RUNDATE=20260822
+            DATEFORMAT=yyyymmdd
+            PROGRAMNAME=getdata
+            START-OF-FIELDS
+            PX_LAST_EOD
+            LAST_UPDATE_DATE_EOD
+            END-OF-FIELDS
+            TIMESTARTED=Sat Aug 22 05:27:19 BST 2026
+            START-OF-DATA
+            VOD LN Equity|0|2|N.A.|20260820|
+            BARC LN Equity|0|2|N.S.|20260820|
+            END-OF-DATA
+            TIMEFINISHED=Sat Aug 22 05:27:23 BST 2026
+            END-OF-FILE
+            """;
+
+    /**
+     * A price that is not a number, which is what a reply looks like when a field
+     * was requested for a security whose data does not fit it.
+     */
+    private static final String PRICE_THAT_IS_NOT_A_NUMBER = """
+            START-OF-FILE
+            RUNDATE=20260822
+            DATEFORMAT=yyyymmdd
+            PROGRAMNAME=getdata
+            START-OF-FIELDS
+            PX_LAST_EOD
+            LAST_UPDATE_DATE_EOD
+            END-OF-FIELDS
+            TIMESTARTED=Sat Aug 22 05:27:19 BST 2026
+            START-OF-DATA
+            MFGEPIC SW Equity|0|2|15.360|20260820|
+            VOD LN Equity|0|2|see note|20260820|
+            END-OF-DATA
+            TIMEFINISHED=Sat Aug 22 05:27:23 BST 2026
+            END-OF-FILE
+            """;
+
+    /**
+     * {@code N.A.} and {@code N.S.} are absent values, not text.
+     * <p>
+     * Worth checking rather than declining, because the alternative reading is
+     * available and wrong: an adapter that handed {@code "N.A."} to the loader as
+     * a {@code DECIMAL} would fail the load, and one that handed it over as text
+     * would put the string in a numeric column or thereabouts. Reading it as
+     * nothing is a decision, and this is where it is recorded.
+     */
+    @Override
+    protected List<Absence> absences() {
+        return List.of(new Absence("Bloomberg has no price for either security",
+                NOTHING_PRICED.getBytes(US_ASCII), "price"));
+    }
+
+    /**
+     * A failure names the security rather than the record's position.
+     * <p>
+     * The format is luckier than most here: a data line begins with the security
+     * it is about, so an operator gets something they can grep the reply for
+     * instead of an ordinal they would have to count out of a file of forty
+     * thousand lines. That is why the expected text is the identifier and not a
+     * number.
+     */
+    @Override
+    protected List<Breakage> breakages() {
+        return List.of(new Breakage("a price that is not a number",
+                PRICE_THAT_IS_NOT_A_NUMBER.getBytes(US_ASCII), "VOD LN Equity"));
     }
 
     private static InputSpec spec(Map<String, String> properties, Locator locator,
