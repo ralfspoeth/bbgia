@@ -1,0 +1,41 @@
+name: build
+
+# This exists mostly for the sake of the release workflow beside it. A tag is
+# irreversible - pushing one publishes a download - so the tag must land on a
+# commit already known to build, and finding out at tag time is finding out too
+# late. The weekly run is for the other direction: this adapter compiles against
+# io.github.ralfspoeth.xldr:ia from Maven Central, so it can be broken by a
+# release of xldr rather than by a commit here, and nothing would say so until
+# the next time somebody happened to build.
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # verify rather than test: the conformance kit runs as an integration test,
+      # and the kit is the contract this adapter has to keep
+      - name: Build and test
+        run: mvn -B -ntp verify
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/*-reports/*.xml'
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,83 @@
+name: release
+
+# The tag is the trigger, and `mvn release:prepare` pushes it, so publishing the
+# jar stays part of releasing rather than a step to remember afterwards. The tag
+# also fixes the version: release:prepare writes the release version into the
+# commit it tags and only then bumps to the next snapshot, so the pom checked out
+# here says 0.1 when the tag says bbgia-0.1.
+#
+# Nothing goes to Maven Central. central-publishing-maven-plugin is active by
+# inheritance from plumbum and switched off in this pom with skipPublishing, so
+# the only published thing is the release this workflow creates. That is the
+# whole of the distribution for an adapter: installing one is copying its jar
+# into an xldr deployment's modules/ directory, the same operation as installing
+# a JDBC driver, so there is nothing for an archive to hold that the jar does
+# not.
+on:
+  push:
+    tags: [ 'bbgia-*' ]
+
+permissions:
+  # to create the release and attach the jar to it, and nothing else
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # Tests run, unlike xldr's release workflow, which skips them because
+      # release:prepare had just run clean verify over the same source. The same
+      # is true here, but this build is also the first time the tag's source is
+      # compiled anywhere but the machine that cut it - and the conformance kit
+      # is what says this adapter still honours the SPI, which is worth a minute
+      # before a download exists.
+      - name: Build and test
+        run: mvn -B -ntp verify
+
+      - name: Collect the jar
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#bbgia-}"
+          jar="target/bbgia-$version.jar"
+          test -f "$jar" || {
+            echo "::error::no $jar - the tag says $version, and the pom built:"
+            ls -1 target/*.jar 2>/dev/null || echo "  (no jars at all)"
+            exit 1
+          }
+          mkdir dist
+          cp "$jar" dist/
+          ls -l dist
+
+      # gh is on the runner already, so this needs no third-party action and no
+      # token beyond the one the job is given
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#bbgia-}"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "bbgia $version" \
+            --notes "The Bloomberg Data License input adapter for
+          [XLDR](https://github.com/ralfspoeth/xldr).
+
+          **Installing it is copying the jar into your xldr distribution's \`modules/\` directory.** Nothing
+          names it in code - JPMS service binding finds the \`InputAdapterFactory\` on the module path - so
+          there is no configuration step and no restart flag. Removing it is deleting the file, after which the
+          server simply stops offering the format.
+
+          Built against \`io.github.ralfspoeth.xldr\` 1.0.0 and Java 25. It needs nothing else at run time: the
+          \`ia\` module it compiles against is already in the distribution's \`lib/\`.
+
+          See [the README](https://github.com/ralfspoeth/bbgia/blob/$GITHUB_REF_NAME/README.md) for the format
+          it reads and the properties it takes.
+
+          Not published to Maven Central."
