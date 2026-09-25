@@ -37,12 +37,12 @@ how many fields follow. The requested fields follow in the order
 Four spellings, and each says where to look rather than what to call it - the
 name is the field selector's `name`, as everywhere else in a spec.
 
-| `selector` | reads |
-|---|---|
-| `PX_LAST_EOD` | a field, spelled as `START-OF-FIELDS` spells it |
-| `tag:RUNDATE` | a header tag; one value for the whole file |
-| `#id`, `#retCode`, `#fieldCount` | the three fixed leading values |
-| `nth: 4` | the 4th value of the line, counting from one |
+| `selector`                       | reads                                           |
+|----------------------------------|-------------------------------------------------|
+| `PX_LAST_EOD`                    | a field, spelled as `START-OF-FIELDS` spells it |
+| `tag:RUNDATE`                    | a header tag; one value for the whole file      |
+| `#id`, `#retCode`, `#fieldCount` | the three fixed leading values                  |
+| `nth: 4`                         | the 4th value of the line, counting from one    |
 
 There is no prefix for the ordinary case, because `PX_LAST_EOD` is what a
 Bloomberg user calls that field. `tag:` is the one marker needed, the tags and
@@ -99,11 +99,11 @@ the other ninety thousand.
 
 ## Properties
 
-| property | default | means |
-|---|---|---|
-| `charset` | `US-ASCII` | what Data License delivers |
-| `dateFormat` | the file's `DATEFORMAT` | a `java.time` pattern; see below |
-| `numberFormat`, `locale` | none | as for every adapter, via `Formats` |
+| property                 | default                 | means                               |
+|--------------------------|-------------------------|-------------------------------------|
+| `charset`                | `US-ASCII`              | what Data License delivers          |
+| `dateFormat`             | the file's `DATEFORMAT` | a `java.time` pattern; see below    |
+| `numberFormat`, `locale` | none                    | as for every adapter, via `Formats` |
 
 **Dates are the one place this format needs care.** A reply declares its own
 spelling in the `DATEFORMAT` tag, and Bloomberg writes the month lower-case -
