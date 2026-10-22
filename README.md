@@ -37,12 +37,13 @@ how many fields follow. The requested fields follow in the order
 Four spellings, and each says where to look rather than what to call it - the
 name is the field selector's `name`, as everywhere else in a spec.
 
-| `selector`                       | reads                                           |
-|----------------------------------|-------------------------------------------------|
-| `PX_LAST_EOD`                    | a field, spelled as `START-OF-FIELDS` spells it |
-| `tag:RUNDATE`                    | a header tag; one value for the whole file      |
-| `#id`, `#retCode`, `#fieldCount` | the three fixed leading values                  |
-| `nth: 4`                         | the 4th value of the line, counting from one    |
+| `selector`                       | reads                                            |
+|----------------------------------|--------------------------------------------------|
+| `PX_LAST_EOD`                    | a field, spelled as `START-OF-FIELDS` spells it  |
+| `tag:RUNDATE`                    | a header tag; one value for the whole file       |
+| `#id`, `#retCode`, `#fieldCount` | the three fixed leading values                   |
+| `nth: 4`                         | the 4th value of the line, counting from one     |
+| `#field`, `#value`               | one row per field - see [below](#one-row-per-field) |
 
 There is no prefix for the ordinary case, because `PX_LAST_EOD` is what a
 Bloomberg user calls that field. `tag:` is the one marker needed, the tags and
@@ -97,13 +98,70 @@ get one, all of them ordinary:
 None of them fails the load. One security without a price should not cost you
 the other ninety thousand.
 
+**A security that answered nothing at all can be dropped**, with
+`skipEmptyRecords`. A line is dropped when none of the record selector's *real*
+fields came back with a value - real meaning a field of the line past the three
+it always begins with. Off by default, because turning it on changes what a load
+inserts.
+
+The exclusions are the whole of making it work. `#id` is on every line and in
+every mapping, so if it counted, nothing would ever be dropped; a `tag:` is the
+same on every line of the file, so it would do the same one level up. And the
+test is over what the record selector *declares*, not over what one mapping
+pulls out of it - "did this security answer?" is a question about the data line,
+and a mapping taking only `#id` from a four-field selector must not thereby make
+every line empty.
+
+A record selector declaring nothing past the fixed three is refused when the
+adapter is built, since the skip would empty it and the load would report
+success having inserted no rows.
+
+## One row per field
+
+A record selector whose field selectors include `#field` or `#value` produces a
+row for every field rather than one wide row per security:
+
+```json
+{ "name": "quotes", "fieldSelectors": [
+    {"name": "security", "selector": "#id"},
+    {"name": "field",    "selector": "#field"},
+    {"name": "value",    "selector": "#value"}
+]}
+```
+
+A reply declaring `PX_LAST_EOD` and `LAST_UPDATE_DATE_EOD` then loads
+
+    VOD LN Equity|0|2|71.240|20260820|
+
+as two rows rather than one, and a three-column table holds any reply at all.
+
+**The fields walked are the ones the file declares**, between `START-OF-FIELDS`
+and `END-OF-FIELDS` - not ones the spec names. That is the reason to do it this
+way: a request whose field list changes loads into the same table without the
+spec being edited, and the table outlives a request that a wide one would not.
+
+A field with no value yields no row, so such a selector needs no
+`skipEmptyRecords`: a security that returned nothing produces nothing. `#value`
+is `TEXT` unless the spec says otherwise, and usually should be - the fields of
+one reply have different types and one column cannot carry them typed. Deferring
+that is what the shape is for.
+
+A discriminator still chooses the data *line*, which happens before the line
+becomes several rows, so it keeps or drops a security whole.
+
+Naming an ordinary field alongside these is allowed rather than refused. It
+repeats that field's value on every row of the security, which is wrong often
+enough to mention and right often enough - a currency beside each quote - that
+the adapter does not get to decide.
+
 ## Properties
 
-| property                 | default                 | means                               |
-|--------------------------|-------------------------|-------------------------------------|
-| `charset`                | `US-ASCII`              | what Data License delivers          |
-| `dateFormat`             | the file's `DATEFORMAT` | a `java.time` pattern; see below    |
-| `numberFormat`, `locale` | none                    | as for every adapter, via `Formats` |
+| property                 | default                 | means                                          |
+|--------------------------|-------------------------|------------------------------------------------|
+| `charset`                | `US-ASCII`              | what Data License delivers                     |
+| `dateFormat`             | the file's `DATEFORMAT` | a `java.time` pattern; see below               |
+| `numberFormat`, `locale` | none                    | as for every adapter, via `Formats`            |
+| `skipEmptyRecords`       | `false`                 | drop a security that answered nothing; see [above](#absent-values) |
 
 **Dates are the one place this format needs care.** A reply declares its own
 spelling in the `DATEFORMAT` tag, and Bloomberg writes the month lower-case -

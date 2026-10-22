@@ -49,6 +49,37 @@ import java.util.stream.Stream;
  * ]
  * </pre>
  *
+ * <h2>One row per field</h2>
+ * <p>
+ * A record selector whose field selectors include {@code #field} or
+ * {@code #value} produces a row for every field rather than one wide row per
+ * security:
+ *
+ * <pre>
+ * { "name": "quotes", "fieldSelectors": [
+ *     {"name": "security", "selector": "#id"},
+ *     {"name": "field",    "selector": "#field"},
+ *     {"name": "value",    "selector": "#value"}
+ * ]}
+ * </pre>
+ * <p>
+ * The fields walked are the ones the <em>file</em> declares between
+ * {@code START-OF-FIELDS} and {@code END-OF-FIELDS}, not ones the spec names,
+ * which is the reason to do it this way: a request whose field list changes
+ * loads into the same table without the spec being touched, and a table of
+ * three columns outlives a request that a wide one would not.
+ * <p>
+ * A field with no value yields no row, so such a selector needs no
+ * {@code skipEmptyRecords} - a security that returned nothing produces nothing.
+ * {@code #value} is {@code TEXT} unless the spec says otherwise, and usually
+ * should be: the fields of one reply have different types and one column cannot
+ * carry them typed.
+ * <p>
+ * Naming an ordinary field alongside these is allowed rather than refused. It
+ * repeats that field's value on every row of the security, which is wrong often
+ * enough to mention and right often enough - a currency beside each quote -
+ * that the adapter does not get to decide.
+ *
  * <h2>Properties</h2>
  * <p>
  * {@code charset} (default {@code US-ASCII}, which is what Data License
@@ -56,6 +87,17 @@ import java.util.stream.Stream;
  * {@code numberFormat}, {@code locale} - applied through {@link Formats}. Where
  * {@code dateFormat} is left out, the file's own {@code DATEFORMAT} tag decides;
  * see {@link #javaDatePattern}.
+ * <p>
+ * {@code skipEmptyRecords} (default {@code false}) drops a data line none of
+ * whose <em>real</em> fields came back with a value - real meaning a field of
+ * the line past the three it always begins with, and counted over what the
+ * record selector declares rather than over what one mapping pulls. Those three are
+ * excluded because {@code #id} is on every line and in every mapping, so
+ * counting it would mean no line is ever empty; a {@code tag:} is excluded for
+ * the same reason one level up, being the same on every line of the file. A
+ * value is missing if it is absent, blank, {@code N.S.} or {@code N.A.}, and
+ * the test reads the text rather than the converted value, so a line is dropped
+ * or kept on what the reply says.
  *
  * <h2>One limit worth knowing</h2>
  * <p>
@@ -81,6 +123,30 @@ class BbgInputAdapter implements InputAdapter {
     private static final String DATE_FORMAT_TAG = "DATEFORMAT";
 
     private static final String CHARSET = "charset";
+
+    /**
+     * Drop a data line none of whose requested real fields came back with a
+     * value. Off by default: turning it on changes what a load inserts, and a
+     * spec that wants fewer rows should have to say so.
+     */
+    private static final String SKIP_EMPTY = "skipEmptyRecords";
+
+    /**
+     * The two addresses that turn a record selector into one row per field -
+     * see {@link Address.FieldName}.
+     */
+    private static final String FIELD = "#field";
+    private static final String VALUE = "#value";
+
+    /**
+     * The ways a reply says nothing, in one place because two places would
+     * drift. {@code N.S.} is not subscribed and {@code N.A.} not available;
+     * blank is a field the line returned empty, which includes the last one,
+     * since a trailing empty value leaves no text after the final pipe.
+     */
+    private static boolean absent(@Nullable String text) {
+        return text == null || text.isBlank() || "N.S.".equals(text) || "N.A.".equals(text);
+    }
 
     /**
      * The three values every data line begins with, addressable by name in every
@@ -129,7 +195,35 @@ class BbgInputAdapter implements InputAdapter {
          * so {@code nth: 4} is the first requested field.
          */
         record At(int index, DataType dataType) implements Address {}
+
+        /**
+         * The name of the field a row is about, written {@code #field}.
+         * <p>
+         * Declaring this or {@link FieldValue} puts a record selector into
+         * one-row-per-field mode: instead of one wide row carrying every
+         * requested field, a data line yields a row for each field the
+         * <em>file</em> declares in {@code START-OF-FIELDS}, carrying the fixed
+         * three, the field's name and its value. The spec therefore does not
+         * name the fields at all, which is the point - a request that changes
+         * its field list does not need the spec edited to follow it.
+         */
+        record FieldName(DataType dataType) implements Address {}
+
+        /**
+         * The value of the field a row is about, written {@code #value}.
+         * <p>
+         * {@code TEXT} unless a spec says otherwise, and it should rarely say
+         * otherwise: the fields of one reply have different types and one column
+         * cannot carry them typed. Deferring that is what the shape is for.
+         */
+        record FieldValue(DataType dataType) implements Address {}
     }
+
+    /**
+     * The field a row is about, in one-row-per-field mode, and {@code null} in
+     * the ordinary wide one.
+     */
+    private record Cell(String name, int index) {}
 
     /**
      * What one file's header said: the tags, where each field sits in a data
@@ -159,7 +253,10 @@ class BbgInputAdapter implements InputAdapter {
      */
     private record Test(Discriminator discriminator, Address at) {
         boolean accepts(String[] line, Header header) {
-            return discriminator.accepts(raw(at, line, header));
+            // no Cell: a discriminator chooses a data line, which happens before
+            // that line is split into one row per field and is the same question
+            // either way
+            return discriminator.accepts(raw(at, line, header, null));
         }
     }
 
@@ -172,9 +269,36 @@ class BbgInputAdapter implements InputAdapter {
      * refuses it - a reply file has one data section and no way to be pointed at
      * part of it - so there is no third case here to write and get wrong.
      */
-    private record Kind(@Nullable Test test, Map<String, Address> addresses) {
+    private record Kind(@Nullable Test test, Map<String, Address> addresses, boolean perField) {
         boolean selects(String[] line, Header header) {
             return test == null || test.accepts(line, header);
+        }
+
+        /**
+         * The addresses of this selector that point at a field of the data line
+         * beyond the fixed three - what "real" means for the skip.
+         * <p>
+         * A tag is not one: it has the same value on every line of the file, so
+         * counting it would mean no line is ever empty. Nor are the fixed three,
+         * for the same reason one step down - {@code #id} is always there, so a
+         * mapping that carries it, which is every mapping, would keep every row.
+         * <p>
+         * Taken from what the <em>selector declares</em> rather than from what
+         * the current mapping asked for. "Did this security answer?" is a
+         * question about the data line, and a mapping that pulls only
+         * {@code #id} out of a selector declaring four fields must not thereby
+         * make every line empty - which is what reading the requested set did,
+         * and what the test for {@code #id} not keeping a line alive now holds
+         * down.
+         */
+        List<Address> realFieldsDeclared(Header header) {
+            return addresses.values().stream().filter(address -> switch (address) {
+                case Address.Named(var field, _) -> header.fieldIndex().getOrDefault(field, -1) >= 3;
+                case Address.At(var index, _) -> index >= 3;
+                case Address.Tag _ -> false;
+                case Address.FieldName _ -> false;
+                case Address.FieldValue _ -> false;
+            }).toList();
         }
     }
 
@@ -189,9 +313,15 @@ class BbgInputAdapter implements InputAdapter {
      */
     private final boolean dateDeclared;
 
+    /**
+     * whether a line none of whose requested real fields has a value is dropped
+     */
+    private final boolean skipEmpty;
+
     BbgInputAdapter(InputSpec inputSpec) {
         this.properties = Map.copyOf(inputSpec.properties());
         this.dateDeclared = properties.containsKey(Formats.DATE_FORMAT);
+        this.skipEmpty = Boolean.parseBoolean(properties.getOrDefault(SKIP_EMPTY, "false"));
         this.charset = properties.containsKey(CHARSET)
                 ? Charset.forName(properties.get(CHARSET))
                 : StandardCharsets.US_ASCII;
@@ -203,7 +333,18 @@ class BbgInputAdapter implements InputAdapter {
             // mapping naming it could not have said which it meant. The CSV
             // adapter in xldr had this exact hole until 0.51, where it was found
             // by the conformance kit rather than by anyone reading the code
-            var kind = new Kind(testOf(rs), Collections.unmodifiableMap(forRecord));
+            var perField = forRecord.values().stream()
+                    .anyMatch(a -> a instanceof Address.FieldName || a instanceof Address.FieldValue);
+            if (skipEmpty && !perField && noRealFieldsIn(rs)) {
+                // the skip would drop every line of this selector, and the load
+                // would report success having inserted nothing. Refused here
+                // rather than discovered by a count of zero at four in the
+                // morning
+                throw new IllegalArgumentException("record selector '" + rs.name() + "' declares no field"
+                        + " beyond #id, #retCode and #fieldCount, so with " + SKIP_EMPTY
+                        + " every one of its lines would be dropped");
+            }
+            var kind = new Kind(testOf(rs), Collections.unmodifiableMap(forRecord), perField);
             if (kinds.putIfAbsent(rs.name(), kind) != null) {
                 throw new IllegalArgumentException("two record selectors are named '" + rs.name()
                         + "'; a mapping names one of them and could not say which");
@@ -251,11 +392,27 @@ class BbgInputAdapter implements InputAdapter {
 
     private static Address addressOf(Selector selector, DataType type) {
         return switch (selector) {
+            case Selector.Text(var text) when FIELD.equals(text) -> new Address.FieldName(type);
+            case Selector.Text(var text) when VALUE.equals(text) -> new Address.FieldValue(type);
             case Selector.Text(var text) when text.startsWith(TAG) ->
                     new Address.Tag(text.substring(TAG.length()), type);
             case Selector.Text(var text) -> new Address.Named(text, type);
             case Selector.Nth nth -> new Address.At(nth.index(), type);
         };
+    }
+
+    /**
+     * Whether a record selector addresses nothing past the fixed three, which
+     * is what makes {@link #SKIP_EMPTY} unsatisfiable for it.
+     */
+    private static boolean noRealFieldsIn(RecordSelectorSpec rs) {
+        return rs.fieldSelectors().stream().noneMatch(fs -> switch (addressOf(fs)) {
+            case Address.Named(var name, _) -> !ALWAYS.containsKey(name);
+            case Address.At(var index, _) -> index >= 3;
+            case Address.Tag _ -> false;
+            case Address.FieldName _ -> false;
+            case Address.FieldValue _ -> false;
+        });
     }
 
     /**
@@ -266,12 +423,18 @@ class BbgInputAdapter implements InputAdapter {
      * stops short of that position - which happens because a trailing empty
      * value leaves no text after the last pipe.
      */
-    private static @Nullable String raw(@Nullable Address address, String[] line, Header header) {
+    private static @Nullable String raw(@Nullable Address address, String[] line, Header header,
+                                        @Nullable Cell cell) {
         return switch (address) {
             case null -> null;
             case Address.Tag(var name, _) -> header.tags().get(name);
             case Address.Named(var name, _) -> at(line, header.fieldIndex().getOrDefault(name, -1));
             case Address.At(var index, _) -> at(line, index);
+            // null where a wide selector declared one of these, which the
+            // constructor does not forbid: it makes the selector per-field, so
+            // there is always a cell by the time a row is resolved
+            case Address.FieldName _ -> cell == null ? null : cell.name();
+            case Address.FieldValue _ -> cell == null ? null : at(line, cell.index());
         };
     }
 
@@ -297,22 +460,21 @@ class BbgInputAdapter implements InputAdapter {
     }
 
     private static @Nullable Object value(String name, @Nullable Address address,
-                                          String[] line, Header header) {
+                                          String[] line, Header header, @Nullable Cell cell) {
         if (address == null) {
             return null;
         } else {
-            var text = raw(address, line, header);
-
+            var text = raw(address, line, header, cell);
+            // absent() rather than a second list of the ways a reply says
+            // nothing, so that this and the skip cannot come to disagree
+            if (absent(text)) {
+                return null;
+            }
             try {
-                return switch (text) {
-                    case null -> null;
-                    // Bloomberg's "not subscribed" and "not available"
-                    case "N.S.", "N.A." -> null;
-                    // through Formats rather than parsing here, so that dateFormat,
-                    // numberFormat and locale mean in this format what they mean in
-                    // every other one
-                    default -> header.formats().parse(address.dataType(), text);
-                };
+                // through Formats rather than parsing here, so that dateFormat,
+                // numberFormat and locale mean in this format what they mean in
+                // every other one
+                return header.formats().parse(address.dataType(), text);
             } catch (RuntimeException e) {
                 // Obligation 7 of the SPI: say which record it was. This format is
                 // luckier than most - a data line begins with the security it is
@@ -385,15 +547,50 @@ class BbgInputAdapter implements InputAdapter {
                 .map(name -> new Field(name, kind.addresses().get(name).dataType().clazz()))
                 .toList();
 
-        var rows = head.dataFollows()
-                ? lines.lines()
-                .takeWhile(line -> !"END-OF-DATA".equals(line))
-                .map(PIPE::split)
-                .filter(line -> kind.selects(line, header))
-                .map(line -> (Row) name -> value(name, kind.addresses().get(name), line, header))
-                : Stream.<Row>empty();
+        Stream<Row> rows;
+        if (!head.dataFollows()) {
+            rows = Stream.empty();
+        } else {
+            var selected = lines.lines()
+                    .takeWhile(line -> !"END-OF-DATA".equals(line))
+                    .map(PIPE::split)
+                    .filter(line -> kind.selects(line, header));
+            if (kind.perField()) {
+                // one row per field the file declares, not per field the spec
+                // names - a changed request is then a changed set of rows
+                // rather than a spec to edit. A field with no value yields no
+                // row, which is also why this mode needs no skipEmptyRecords:
+                // a security that returned nothing produces nothing
+                var cells = realFields(header);
+                rows = selected.flatMap(line -> cells.stream()
+                        .filter(cell -> !absent(at(line, cell.index())))
+                        .map(cell -> (Row) name ->
+                                value(name, kind.addresses().get(name), line, header, cell)));
+            } else {
+                var real = kind.realFieldsDeclared(header);
+                rows = selected
+                        .filter(line -> !skipEmpty || real.stream()
+                                .anyMatch(address -> !absent(raw(address, line, header, null))))
+                        .map(line -> (Row) name ->
+                                value(name, kind.addresses().get(name), line, header, null));
+            }
+        }
 
         return new Result(fields, rows);
+    }
+
+    /**
+     * The fields the reply declared, in the order it declared them, excluding
+     * the three every data line begins with.
+     * <p>
+     * This is what a one-row-per-field selector walks, and taking it from the
+     * header rather than from the spec is the whole point of that mode.
+     */
+    private static List<Cell> realFields(Header header) {
+        return header.fieldIndex().entrySet().stream()
+                .filter(e -> e.getValue() >= 3)
+                .map(e -> new Cell(e.getKey(), e.getValue()))
+                .toList();
     }
 
     /**

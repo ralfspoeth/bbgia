@@ -264,4 +264,202 @@ public class BbgInputAdapterTest {
         return fields.stream().map(f -> "%s: %s".formatted(f, row.get(f)))
                 .collect(joining(", ", "{", "}"));
     }
+
+    // ---- skipEmptyRecords, and one row per field -----------------------------
+
+    /**
+     * Four securities and the four ways a reply answers: everything, nothing at
+     * all, nothing because the line stopped short, and half.
+     * <p>
+     * The third is written with its pipes because that is how an empty value
+     * arrives, and it matters that it is not the same shape as the second:
+     * {@code split} drops trailing empty strings, so that line has three
+     * components and the fields are read off the end of it rather than found
+     * blank.
+     */
+    private static final String SPARSE = """
+            START-OF-FILE
+            RUNDATE=20260822
+            DATEFORMAT=yyyymmdd
+            START-OF-FIELDS
+            PX_LAST_EOD
+            LAST_UPDATE_DATE_EOD
+            END-OF-FIELDS
+            START-OF-DATA
+            VOD LN Equity|0|2|71.240|20260820|
+            DEAD LN Equity|0|2|N.A.|N.A.|
+            BLANK LN Equity|0|2|||
+            PART LN Equity|0|2|12.500|N.A.|
+            END-OF-DATA
+            END-OF-FILE
+            """;
+
+    /** the four fields of SPARSE, as a spec that names them would ask */
+    private static final List<String> SPARSE_FIELDS =
+            List.of("#id", "runDate", "price", "lastUpdate");
+
+    private InputAdapter wide(Map<String, String> properties) {
+        return IAF.createInputAdapter(new InputSpec("application/x-bloomberg-out", List.of(
+                new RecordSelectorSpec("all", Locator.every(), List.of(
+                        new FieldSelectorSpec("runDate", "tag:RUNDATE", DataType.TEMPORAL),
+                        new FieldSelectorSpec("price", "PX_LAST_EOD", DataType.DECIMAL),
+                        new FieldSelectorSpec("lastUpdate", "LAST_UPDATE_DATE_EOD", DataType.TEMPORAL)))
+        ), List.of(), properties));
+    }
+
+    private List<String> idsFrom(InputAdapter adapter, String content, List<String> fields) {
+        try (var is = new ByteArrayInputStream(content.getBytes(US_ASCII));
+             var rows = adapter.parse(is, "all", new HashSet<>(fields)).rows()) {
+            return rows.map(r -> String.valueOf(r.get("#id"))).toList();
+        } catch (IOException e) {
+            throw new UncheckedIOException("all", e);
+        }
+    }
+
+    /**
+     * The default is every line, because dropping one changes what a load
+     * inserts and a spec should have to ask for that.
+     */
+    @Test
+    public void keepsEverySecurityUnlessAskedNotTo() {
+        assertEquals(
+                List.of("VOD LN Equity", "DEAD LN Equity", "BLANK LN Equity", "PART LN Equity"),
+                idsFrom(wide(Map.of()), SPARSE, SPARSE_FIELDS));
+    }
+
+    /**
+     * With the property on, the two securities that answered nothing are gone
+     * and the one that answered half is not: N.A., N.S. and an absent value are
+     * the same thing, and one field is enough to keep a line.
+     */
+    @Test
+    public void dropsAsecurityThatAnsweredNothing() {
+        assertEquals(
+                List.of("VOD LN Equity", "PART LN Equity"),
+                idsFrom(wide(Map.of("skipEmptyRecords", "true")), SPARSE, SPARSE_FIELDS));
+    }
+
+    /**
+     * The point the feature turns on, and the reason "no field has a value"
+     * cannot be read literally: {@code #id} is on every line and in every
+     * mapping, and a tag is the same on every line of the file. If either
+     * counted, nothing would ever be dropped and the property would look like
+     * it did not work.
+     */
+    @Test
+    public void neitherTheIdNorAtagKeepsAnEmptySecurityAlive() {
+        var skipping = wide(Map.of("skipEmptyRecords", "true"));
+        assertEquals(
+                List.of("VOD LN Equity", "PART LN Equity"),
+                idsFrom(skipping, SPARSE, List.of("#id")),
+                "#id alone does not make a line worth keeping");
+        assertEquals(
+                List.of("VOD LN Equity", "PART LN Equity"),
+                idsFrom(skipping, SPARSE, List.of("#id", "#retCode", "#fieldCount", "runDate")),
+                "nor do the other two fixed fields, nor tag:RUNDATE");
+    }
+
+    /**
+     * A selector that could never keep a line is refused when the adapter is
+     * built. It would otherwise load nothing and report success, which is the
+     * failure this project keeps trying to remove.
+     */
+    @Test
+    public void refusesAselectorTheSkipWouldEmpty() {
+        var thrown = assertThrows(IllegalArgumentException.class, () ->
+                IAF.createInputAdapter(new InputSpec("application/x-bloomberg-out", List.of(
+                        new RecordSelectorSpec("headersOnly", Locator.every(), List.of(
+                                new FieldSelectorSpec("runDate", "tag:RUNDATE", DataType.TEMPORAL)))
+                ), List.of(), Map.of("skipEmptyRecords", "true"))));
+        assertAll(
+                () -> assertTrue(thrown.getMessage().contains("headersOnly"), thrown.getMessage()),
+                () -> assertTrue(thrown.getMessage().contains("skipEmptyRecords"), thrown.getMessage()));
+    }
+
+    private InputAdapter perField() {
+        return IAF.createInputAdapter(new InputSpec("application/x-bloomberg-out", List.of(
+                new RecordSelectorSpec("all", Locator.every(), List.of(
+                        new FieldSelectorSpec("field", "#field", DataType.TEXT),
+                        new FieldSelectorSpec("value", "#value", DataType.TEXT)))
+        ), List.of(), Map.of()));
+    }
+
+    private List<String> longRows(InputAdapter adapter, String content) {
+        var fields = List.of("#id", "field", "value");
+        try (var is = new ByteArrayInputStream(content.getBytes(US_ASCII));
+             var rows = adapter.parse(is, "all", new HashSet<>(fields)).rows()) {
+            return rows.map(r -> fields.stream()
+                    .map(f -> String.valueOf(r.get(f)))
+                    .collect(joining("|"))).toList();
+        } catch (IOException e) {
+            throw new UncheckedIOException("all", e);
+        }
+    }
+
+    /**
+     * One row per field the file declares, and none for a field that answered
+     * nothing - so the two securities with no values contribute no rows at all,
+     * and the half-answered one contributes a single row.
+     */
+    @Test
+    public void makesOneRowPerFieldAndNoneForAnAbsentOne() {
+        assertEquals(
+                List.of("VOD LN Equity|PX_LAST_EOD|71.240",
+                        "VOD LN Equity|LAST_UPDATE_DATE_EOD|20260820",
+                        "PART LN Equity|PX_LAST_EOD|12.500"),
+                longRows(perField(), SPARSE));
+    }
+
+    /**
+     * The spec names no field, so a request that asks for different ones loads
+     * into the same table without being edited. That is the whole reason to
+     * read the field list from the file rather than from the spec, and this is
+     * the test that would fail if it were ever read from the spec instead.
+     */
+    @Test
+    public void followsTheFieldsTheFileDeclaresRatherThanAnyTheSpecNames() {
+        var different = """
+                START-OF-FILE
+                RUNDATE=20260822
+                DATEFORMAT=yyyymmdd
+                START-OF-FIELDS
+                CRNCY
+                SECURITY_TYP
+                CPN
+                END-OF-FIELDS
+                START-OF-DATA
+                VOD LN Equity|0|3|GBp|Common Stock|N.A.|
+                END-OF-DATA
+                END-OF-FILE
+                """;
+        assertEquals(
+                List.of("VOD LN Equity|CRNCY|GBp",
+                        "VOD LN Equity|SECURITY_TYP|Common Stock"),
+                longRows(perField(), different),
+                "three fields declared, one of them N.A., so two rows");
+    }
+
+    /**
+     * A discriminator chooses the data line, which happens before the line
+     * becomes several rows - so it keeps or drops a security whole.
+     */
+    @Test
+    public void thePerFieldSelectorStillObeysAdiscriminator() {
+        var adapter = IAF.createInputAdapter(new InputSpec("application/x-bloomberg-out", List.of(
+                new RecordSelectorSpec("all", new Locator.Where(
+                        new Discriminator.Matches(
+                                new Selector.Text("#id"), Pattern.compile(".*Equity"))
+                ), List.of(
+                        new FieldSelectorSpec("field", "#field", DataType.TEXT),
+                        new FieldSelectorSpec("value", "#value", DataType.TEXT)))
+        ), List.of(), Map.of()));
+        assertEquals(
+                List.of("MFGEPIC SW Equity|PX_LAST_EOD|15.360",
+                        "MFGEPIC SW Equity|LAST_UPDATE_DATE_EOD|20260820",
+                        "VOD LN Equity|PX_LAST_EOD|71.240",
+                        "VOD LN Equity|LAST_UPDATE_DATE_EOD|20260820",
+                        "DAI GY Equity|PX_LAST_EOD|54.980",
+                        "DAI GY Equity|LAST_UPDATE_DATE_EOD|20260820"),
+                longRows(adapter, MIXED));
+    }
 }
