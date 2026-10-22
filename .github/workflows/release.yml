@@ -70,12 +70,16 @@ jobs:
           [XLDR](https://github.com/ralfspoeth/xldr).
 
           **Installing it is copying the jar into your xldr distribution's \`modules/\` directory.** Nothing
-          names it in code - JPMS service binding finds the \`InputAdapterFactory\` on the module path - so
-          there is no configuration step and no restart flag. Removing it is deleting the file, after which the
-          server simply stops offering the format.
+          names it in code - \`ServiceLoader\` finds the \`InputAdapterFactory\` - so there is no configuration
+          step and no restart flag. Removing it is deleting the file, after which the server simply stops
+          offering the format.
 
-          Built against \`io.github.ralfspoeth.xldr\` 1.0.0 and Java 25. It needs nothing else at run time: the
-          \`ia\` module it compiles against is already in the distribution's \`lib/\`.
+          **A classpath works too**, which it did not before 0.2: a war, or anything Quarkus builds, puts the jar
+          in the unnamed module where a \`provides\` directive is ignored, so the adapter also declares itself in
+          \`META-INF/services\`.
+
+          Needs xldr 1.0 or later and Java 25. Nothing else at run time: the \`ia\` module it compiles against is
+          already in the distribution's \`lib/\`.
 
           See [the README](https://github.com/ralfspoeth/bbgia/blob/$GITHUB_REF_NAME/README.md) for the format
           it reads and the properties it takes.
