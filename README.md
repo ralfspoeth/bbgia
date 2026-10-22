@@ -3,9 +3,16 @@
 An [xldr](https://github.com/ralfspoeth/xldr) input adapter for Bloomberg Data
 License reply files - the `.out` a `getdata` request comes back as.
 
-It is a format module and nothing else: put it on the module path and a spec
+It is a format module and nothing else: put the jar on the path and a spec
 saying `"mimeType": "application/x-bloomberg-out"` is read by it, through
 `ServiceLoader`. Nothing in xldr knows this module exists.
+
+Either path. It declares itself twice - `provides` in `module-info` and a line
+in `META-INF/services` - because the directive is read only for a resolved
+named module, so a jar on a *classpath*, which is what a war holds and what
+Quarkus builds, lands in the unnamed module and has its directive ignored
+entirely. One of the two is dead weight in any given deployment and there is no
+telling in advance which.
 
 ## The format
 
