@@ -10,12 +10,12 @@
 
     <groupId>io.github.ralfspoeth.xldr</groupId>
     <artifactId>bbgia</artifactId>
-    <version>0.2-SNAPSHOT</version>
+    <version>0.2</version>
 
     <scm>
         <url>scm:git:https://github.com/ralfspoeth/bbgia</url>
         <developerConnection>scm:git:https://github.com/ralfspoeth/bbgia.git</developerConnection>
-        <tag>HEAD</tag>
+        <tag>bbgia-0.2</tag>
     </scm>
 
     <properties>
